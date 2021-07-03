@@ -81,8 +81,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.GPFifo
             for (int index = 0; index < _subChannels.Length; index++)
             {
                 _subChannels[index] = new GpuState(channel, _subChannels2[index]);
-
-                _context.Methods.RegisterCallbacks(_subChannels[index]);
             }
         }
 
@@ -158,9 +156,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.GPFifo
                 meth.SecOp == SecOp.NonIncMethod &&
                 meth.MethodAddress == (int)MethodOffset.UniformBufferUpdateData)
             {
-                GpuState state = _subChannels[meth.MethodSubchannel];
-
-                // _context.Methods.UniformBufferUpdate(state, commandBuffer.Slice(offset + 1, meth.MethodCount));
                 _3dClass.ConstantBufferUpdate(commandBuffer.Slice(offset + 1, meth.MethodCount));
 
                 return true;
@@ -178,8 +173,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.GPFifo
             if ((MethodOffset)meth.Method == MethodOffset.BindChannel)
             {
                 _subChannels[meth.SubChannel].ClearCallbacks();
-
-                _context.Methods.RegisterCallbacks(_subChannels[meth.SubChannel]);
             }
             else if (meth.Method < 0x60)
             {
@@ -207,7 +200,6 @@ namespace Ryujinx.Graphics.Gpu.Engine.GPFifo
                 {
                     _fifoClass.CallMme(macroIndex, _subChannels[meth.SubChannel]);
 
-                    _context.Methods.PerformDeferredDraws();
                     _3dClass.PerformDeferredDraws();
                 }
             }
