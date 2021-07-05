@@ -55,13 +55,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
 
             string ApplyScaling(string vector)
             {
+                int index = context.FindImageDescriptorIndex(texOp);
+
                 if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
                     texOp.Inst == Instruction.ImageLoad &&
                     !isBindless &&
                     !isIndexed)
                 {
                     // Image scales start after texture ones.
-                    int scaleIndex = context.Config.GetTextureDescriptors().Length + context.FindImageDescriptorIndex(texOp);
+                    int scaleIndex = context.Config.GetTextureDescriptors().Length + index;
 
                     if (pCount == 3 && isArray)
                     {
@@ -459,12 +461,12 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             {
                 if (intCoords)
                 {
+                    int index = context.FindTextureDescriptorIndex(texOp);
+
                     if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
                         !isBindless &&
                         !isIndexed)
                     {
-                        int index = context.FindTextureDescriptorIndex(texOp);
-
                         if (pCount == 3 && isArray)
                         {
                             // The array index is not scaled, just x and y.
@@ -606,18 +608,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Glsl.Instructions
             }
             else
             {
-                string texCall = $"textureSize({samplerName}, {lodExpr}){GetMask(texOp.Index)}";
-
-                if ((context.Config.Stage == ShaderStage.Fragment || context.Config.Stage == ShaderStage.Compute) &&
-                    !isBindless &&
-                    !isIndexed)
-                {
-                    int index = context.FindTextureDescriptorIndex(texOp);
-
-                    texCall = "Helper_TextureSizeUnscale(" + texCall + ", " + index + ")";
-                }
-
-                return texCall;
+                return $"textureSize({samplerName}, {lodExpr}){GetMask(texOp.Index)}";
             }
         }
 
