@@ -1,43 +1,69 @@
-using Ryujinx.Common;
+﻿using Ryujinx.Common;
 using Ryujinx.Graphics.GAL;
-using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Gpu.State;
-using System;
-using System.Runtime.InteropServices;
 
-namespace Ryujinx.Graphics.Gpu.Engine
+namespace Ryujinx.Graphics.Gpu.Engine.Threed
 {
-    partial class Methods
+    class SemaphoreUpdater
     {
-        private const int NsToTicksFractionNumerator   = 384;
+        private const int NsToTicksFractionNumerator = 384;
         private const int NsToTicksFractionDenominator = 625;
+
+        private readonly GpuContext _context;
+        private readonly GpuChannel _channel;
+        private readonly DeviceStateWithShadow<ThreedClassState> _state;
+
+        public SemaphoreUpdater(GpuContext context, GpuChannel channel, DeviceStateWithShadow<ThreedClassState> state)
+        {
+            _context = context;
+            _channel = channel;
+            _state = state;
+        }
+
+        /// <summary>
+        /// Resets the value of an internal GPU counter back to zero.
+        /// </summary>
+        /// <param name="argument">Method call argument</param>
+        public void ResetCounter(int argument)
+        {
+            ResetCounterType type = (ResetCounterType)argument;
+
+            switch (type)
+            {
+                case ResetCounterType.SamplesPassed:
+                    _context.Renderer.ResetCounter(CounterType.SamplesPassed);
+                    break;
+                case ResetCounterType.PrimitivesGenerated:
+                    _context.Renderer.ResetCounter(CounterType.PrimitivesGenerated);
+                    break;
+                case ResetCounterType.TransformFeedbackPrimitivesWritten:
+                    _context.Renderer.ResetCounter(CounterType.TransformFeedbackPrimitivesWritten);
+                    break;
+            }
+        }
 
         /// <summary>
         /// Writes a GPU counter to guest memory.
         /// </summary>
-        /// <param name="state">Current GPU state</param>
         /// <param name="argument">Method call argument</param>
-        private void Report(GpuState state, int argument)
+        public void Report(int argument)
         {
             SemaphoreOperation op = (SemaphoreOperation)(argument & 3);
             ReportCounterType type = (ReportCounterType)((argument >> 23) & 0x1f);
 
             switch (op)
             {
-                case SemaphoreOperation.Release: ReleaseSemaphore(state);    break;
-                case SemaphoreOperation.Counter: ReportCounter(state, type); break;
+                case SemaphoreOperation.Release: ReleaseSemaphore(); break;
+                case SemaphoreOperation.Counter: ReportCounter(type); break;
             }
         }
 
         /// <summary>
         /// Writes (or Releases) a GPU semaphore value to guest memory.
         /// </summary>
-        /// <param name="state">Current GPU state</param>
-        private void ReleaseSemaphore(GpuState state)
+        private void ReleaseSemaphore()
         {
-            var rs = state.Get<SemaphoreState>(MethodOffset.ReportState);
-
-            state.Channel.MemoryManager.Write(rs.Address.Pack(), rs.Payload);
+            _channel.MemoryManager.Write(_state.State.SemaphoreAddress.Pack(), _state.State.SemaphorePayload);
 
             _context.AdvanceSequence();
         }
@@ -55,13 +81,10 @@ namespace Ryujinx.Graphics.Gpu.Engine
         /// Writes a GPU counter to guest memory.
         /// This also writes the current timestamp value.
         /// </summary>
-        /// <param name="state">Current GPU state</param>
         /// <param name="type">Counter to be written to memory</param>
-        private void ReportCounter(GpuState state, ReportCounterType type)
+        private void ReportCounter(ReportCounterType type)
         {
-            var rs = state.Get<SemaphoreState>(MethodOffset.ReportState);
-
-            ulong gpuVa = rs.Address.Pack();
+            ulong gpuVa = _state.State.SemaphoreAddress.Pack();
 
             ulong ticks = ConvertNanosecondsToTicks((ulong)PerformanceCounter.ElapsedNanoseconds);
 
@@ -74,18 +97,19 @@ namespace Ryujinx.Graphics.Gpu.Engine
 
             ICounterEvent counter = null;
 
-            EventHandler<ulong> resultHandler = (object evt, ulong result) =>
+            void resultHandler(object evt, ulong result)
             {
-                CounterData counterData = new CounterData();
-
-                counterData.Counter = result;
-                counterData.Timestamp = ticks;
+                CounterData counterData = new CounterData
+                {
+                    Counter = result,
+                    Timestamp = ticks
+                };
 
                 if (counter?.Invalid != true)
                 {
-                    state.Channel.MemoryManager.Write(gpuVa, counterData);
+                    _channel.MemoryManager.Write(gpuVa, counterData);
                 }
-            };
+            }
 
             switch (type)
             {
@@ -103,7 +127,7 @@ namespace Ryujinx.Graphics.Gpu.Engine
                     break;
             }
 
-            state.Channel.MemoryManager.CounterCache.AddOrUpdate(gpuVa, counter);
+            _channel.MemoryManager.CounterCache.AddOrUpdate(gpuVa, counter);
         }
 
         /// <summary>

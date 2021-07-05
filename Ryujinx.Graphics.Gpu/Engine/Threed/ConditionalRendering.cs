@@ -3,35 +3,35 @@ using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Gpu.State;
 
-namespace Ryujinx.Graphics.Gpu.Engine
+namespace Ryujinx.Graphics.Gpu.Engine.Threed
 {
-    partial class Methods
+    static class ConditionalRendering
     {
         /// <summary>
         /// Checks if draws and clears should be performed, according
         /// to currently set conditional rendering conditions.
         /// </summary>
-        /// <param name="state">GPU state</param>
+        /// <param name="context">GPU context</param>
+        /// <param name="memoryManager">Memory manager bound to the channel currently executing</param>
+        /// <param name="conditionState">Conditional rendering state</param>
         /// <returns>True if rendering is enabled, false otherwise</returns>
-        private ConditionalRenderEnabled GetRenderEnable(GpuState state)
+        public static ConditionalRenderEnabled GetRenderEnable(GpuContext context, MemoryManager memoryManager, ConditionState conditionState)
         {
-            ConditionState condState = state.Get<ConditionState>(MethodOffset.ConditionState);
-
-            switch (condState.Condition)
+            switch (conditionState.Condition)
             {
                 case Condition.Always:
                     return ConditionalRenderEnabled.True;
                 case Condition.Never:
                     return ConditionalRenderEnabled.False;
                 case Condition.ResultNonZero:
-                    return CounterNonZero(state, condState.Address.Pack());
+                    return CounterNonZero(context, memoryManager, conditionState.Address.Pack());
                 case Condition.Equal:
-                    return CounterCompare(state, condState.Address.Pack(), true);
+                    return CounterCompare(context, memoryManager, conditionState.Address.Pack(), true);
                 case Condition.NotEqual:
-                    return CounterCompare(state, condState.Address.Pack(), false);
+                    return CounterCompare(context, memoryManager, conditionState.Address.Pack(), false);
             }
 
-            Logger.Warning?.Print(LogClass.Gpu, $"Invalid conditional render condition \"{condState.Condition}\".");
+            Logger.Warning?.Print(LogClass.Gpu, $"Invalid conditional render condition \"{conditionState.Condition}\".");
 
             return ConditionalRenderEnabled.True;
         }
@@ -39,54 +39,56 @@ namespace Ryujinx.Graphics.Gpu.Engine
         /// <summary>
         /// Checks if the counter value at a given GPU memory address is non-zero.
         /// </summary>
-        /// <param name="state">GPU state</param>
+        /// <param name="context">GPU context</param>
+        /// <param name="memoryManager">Memory manager bound to the channel currently executing</param>
         /// <param name="gpuVa">GPU virtual address of the counter value</param>
         /// <returns>True if the value is not zero, false otherwise. Returns host if handling with host conditional rendering</returns>
-        private ConditionalRenderEnabled CounterNonZero(GpuState state, ulong gpuVa)
+        private static ConditionalRenderEnabled CounterNonZero(GpuContext context, MemoryManager memoryManager, ulong gpuVa)
         {
-            ICounterEvent evt = state.Channel.MemoryManager.CounterCache.FindEvent(gpuVa);
+            ICounterEvent evt = memoryManager.CounterCache.FindEvent(gpuVa);
 
             if (evt == null)
             {
                 return ConditionalRenderEnabled.False;
             }
 
-            if (_context.Renderer.Pipeline.TryHostConditionalRendering(evt, 0L, false))
+            if (context.Renderer.Pipeline.TryHostConditionalRendering(evt, 0L, false))
             {
                 return ConditionalRenderEnabled.Host;
             }
             else
             {
                 evt.Flush();
-                return (state.Channel.MemoryManager.Read<ulong>(gpuVa) != 0) ? ConditionalRenderEnabled.True : ConditionalRenderEnabled.False;
+                return (memoryManager.Read<ulong>(gpuVa) != 0) ? ConditionalRenderEnabled.True : ConditionalRenderEnabled.False;
             }
         }
 
         /// <summary>
         /// Checks if the counter at a given GPU memory address passes a specified equality comparison.
         /// </summary>
-        /// <param name="state">GPU state</param>
+        /// <param name="context">GPU context</param>
+        /// <param name="memoryManager">Memory manager bound to the channel currently executing</param>
         /// <param name="gpuVa">GPU virtual address</param>
         /// <param name="isEqual">True to check if the values are equal, false to check if they are not equal</param>
         /// <returns>True if the condition is met, false otherwise. Returns host if handling with host conditional rendering</returns>
-        private ConditionalRenderEnabled CounterCompare(GpuState state, ulong gpuVa, bool isEqual)
+        private static ConditionalRenderEnabled CounterCompare(GpuContext context, MemoryManager memoryManager, ulong gpuVa, bool isEqual)
         {
-            ICounterEvent evt = FindEvent(state.Channel.MemoryManager.CounterCache, gpuVa);
-            ICounterEvent evt2 = FindEvent(state.Channel.MemoryManager.CounterCache, gpuVa + 16);
+            ICounterEvent evt = FindEvent(memoryManager.CounterCache, gpuVa);
+            ICounterEvent evt2 = FindEvent(memoryManager.CounterCache, gpuVa + 16);
 
             bool useHost;
 
             if (evt != null && evt2 == null)
             {
-                useHost = _context.Renderer.Pipeline.TryHostConditionalRendering(evt, state.Channel.MemoryManager.Read<ulong>(gpuVa + 16), isEqual);
+                useHost = context.Renderer.Pipeline.TryHostConditionalRendering(evt, memoryManager.Read<ulong>(gpuVa + 16), isEqual);
             }
             else if (evt == null && evt2 != null)
             {
-                useHost = _context.Renderer.Pipeline.TryHostConditionalRendering(evt2, state.Channel.MemoryManager.Read<ulong>(gpuVa), isEqual);
+                useHost = context.Renderer.Pipeline.TryHostConditionalRendering(evt2, memoryManager.Read<ulong>(gpuVa), isEqual);
             }
             else if (evt != null && evt2 != null)
             {
-                useHost = _context.Renderer.Pipeline.TryHostConditionalRendering(evt, evt2, isEqual);
+                useHost = context.Renderer.Pipeline.TryHostConditionalRendering(evt, evt2, isEqual);
             }
             else
             {
@@ -102,8 +104,8 @@ namespace Ryujinx.Graphics.Gpu.Engine
                 evt?.Flush();
                 evt2?.Flush();
 
-                ulong x = state.Channel.MemoryManager.Read<ulong>(gpuVa);
-                ulong y = state.Channel.MemoryManager.Read<ulong>(gpuVa + 16);
+                ulong x = memoryManager.Read<ulong>(gpuVa);
+                ulong y = memoryManager.Read<ulong>(gpuVa + 16);
 
                 return (isEqual ? x == y : x != y) ? ConditionalRenderEnabled.True : ConditionalRenderEnabled.False;
             }
